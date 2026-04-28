@@ -14,7 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      faces: {
+        Row: {
+          created_at: string
+          descriptor: Json
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          descriptor: Json
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          descriptor?: Json
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
