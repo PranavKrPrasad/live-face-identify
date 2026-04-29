@@ -165,7 +165,7 @@ export function FaceRecognition() {
             }
 
             // Top expression
-            const expEntries = Object.entries(det.expressions as Record<string, number>);
+            const expEntries = Object.entries(det.expressions as unknown as Record<string, number>);
             const [topExp, topScore] = expEntries.reduce(
               (a, b) => (b[1] > a[1] ? b : a),
               ["neutral", 0] as [string, number],
