@@ -27,6 +27,22 @@ export function FaceRecognition() {
   const knownRef = useRef<KnownFace[]>([]);
   const matcherRef = useRef<ReturnType<typeof buildMatcher>>(null);
 
+  // Temporal smoothing: track faces across frames via box IOU and average
+  // their expression/age/gender over the last N frames to prevent flicker.
+  type TrackedFace = {
+    id: number;
+    box: { x: number; y: number; width: number; height: number };
+    expHistory: Record<string, number>[]; // recent expression score maps
+    ageHistory: number[];
+    genderHistory: { male: number; female: number }[];
+    lastSeen: number;
+  };
+  const tracksRef = useRef<TrackedFace[]>([]);
+  const nextTrackIdRef = useRef(1);
+  const HISTORY_SIZE = 8; // frames to average over (~1.3s at 6fps)
+  const IOU_THRESHOLD = 0.3;
+  const TRACK_TTL_MS = 1000;
+
   const [modelsReady, setModelsReady] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [knownFaces, setKnownFaces] = useState<KnownFace[]>([]);
