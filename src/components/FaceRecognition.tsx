@@ -180,15 +180,82 @@ export function FaceRecognition() {
               }
             }
 
-            // Top expression
-            const expEntries = Object.entries(det.expressions as unknown as Record<string, number>);
-            const [topExp, topScore] = expEntries.reduce(
+            // --- Match this detection to an existing track via IOU ---
+            const detBox = { x, y, width, height };
+            const iou = (
+              a: { x: number; y: number; width: number; height: number },
+              b: { x: number; y: number; width: number; height: number },
+            ) => {
+              const x1 = Math.max(a.x, b.x);
+              const y1 = Math.max(a.y, b.y);
+              const x2 = Math.min(a.x + a.width, b.x + b.width);
+              const y2 = Math.min(a.y + a.height, b.y + b.height);
+              const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+              const union =
+                a.width * a.height + b.width * b.height - inter;
+              return union > 0 ? inter / union : 0;
+            };
+
+            let track = tracksRef.current
+              .map((t) => ({ t, score: iou(t.box, detBox) }))
+              .filter((s) => s.score > IOU_THRESHOLD)
+              .sort((a, b) => b.score - a.score)[0]?.t;
+
+            if (!track) {
+              track = {
+                id: nextTrackIdRef.current++,
+                box: detBox,
+                expHistory: [],
+                ageHistory: [],
+                genderHistory: [],
+                lastSeen: ts,
+              };
+              tracksRef.current.push(track);
+            }
+
+            // Update track with current frame's predictions
+            track.box = detBox;
+            track.lastSeen = ts;
+            const currentExp = det.expressions as unknown as Record<
+              string,
+              number
+            >;
+            track.expHistory.push({ ...currentExp });
+            if (track.expHistory.length > HISTORY_SIZE)
+              track.expHistory.shift();
+            track.ageHistory.push(det.age);
+            if (track.ageHistory.length > HISTORY_SIZE)
+              track.ageHistory.shift();
+            const genderProb =
+              det.gender === "male"
+                ? { male: det.genderProbability, female: 1 - det.genderProbability }
+                : { male: 1 - det.genderProbability, female: det.genderProbability };
+            track.genderHistory.push(genderProb);
+            if (track.genderHistory.length > HISTORY_SIZE)
+              track.genderHistory.shift();
+
+            // Compute smoothed values by averaging history
+            const avgExp: Record<string, number> = {};
+            track.expHistory.forEach((frame) => {
+              for (const k in frame) avgExp[k] = (avgExp[k] || 0) + frame[k];
+            });
+            for (const k in avgExp) avgExp[k] /= track.expHistory.length;
+
+            const [topExp, topScore] = Object.entries(avgExp).reduce(
               (a, b) => (b[1] > a[1] ? b : a),
               ["neutral", 0] as [string, number],
             );
             const emoji = expressionEmoji[topExp] ?? "";
-            const age = Math.round(det.age);
-            const gender = det.gender;
+
+            const avgAge =
+              track.ageHistory.reduce((s, v) => s + v, 0) /
+              track.ageHistory.length;
+            const age = Math.round(avgAge);
+
+            const avgMale =
+              track.genderHistory.reduce((s, v) => s + v.male, 0) /
+              track.genderHistory.length;
+            const gender = avgMale >= 0.5 ? "male" : "female";
 
             // Box
             ctx.strokeStyle = color;
@@ -204,7 +271,7 @@ export function FaceRecognition() {
             ctx.fillStyle = "white";
             ctx.fillText(topText, x + 6, y - 8);
 
-            // Bottom label (expression + age + gender)
+            // Bottom label (smoothed expression + age + gender)
             const bottomText = `${emoji} ${topExp} ${Math.round(topScore * 100)}% · ${gender} ${age}`;
             ctx.font = "500 14px system-ui, sans-serif";
             const botW = ctx.measureText(bottomText).width;
@@ -213,6 +280,11 @@ export function FaceRecognition() {
             ctx.fillStyle = "white";
             ctx.fillText(bottomText, x + 6, y + height + 16);
           });
+
+          // Drop stale tracks (faces no longer visible)
+          tracksRef.current = tracksRef.current.filter(
+            (t) => ts - t.lastSeen < TRACK_TTL_MS,
+          );
         } catch (err) {
           console.error("Detection error", err);
         }
