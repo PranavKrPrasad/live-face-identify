@@ -121,7 +121,9 @@ export function FaceRecognition() {
           const results = await faceapi
             .detectAllFaces(video, detectorOptions)
             .withFaceLandmarks()
-            .withFaceDescriptors();
+            .withFaceDescriptors()
+            .withFaceExpressions()
+            .withAgeAndGender();
 
           const displaySize = {
             width: video.videoWidth,
@@ -140,29 +142,60 @@ export function FaceRecognition() {
           setDetectedCount(resized.length);
           const matcher = matcherRef.current;
 
+          const expressionEmoji: Record<string, string> = {
+            happy: "😄",
+            sad: "😢",
+            angry: "😠",
+            surprised: "😲",
+            fearful: "😨",
+            disgusted: "🤢",
+            neutral: "😐",
+          };
+
           resized.forEach((det) => {
             const { x, y, width, height } = det.detection.box;
             let label = "Unknown";
-            let color = "hsl(0, 84%, 60%)"; // destructive red
+            let color = "hsl(0, 84%, 60%)";
             if (matcher) {
               const best = matcher.findBestMatch(det.descriptor);
               if (best.label !== "unknown") {
                 label = best.label;
-                color = "hsl(142, 76%, 45%)"; // green
+                color = "hsl(142, 76%, 45%)";
               }
             }
+
+            // Top expression
+            const expEntries = Object.entries(det.expressions as unknown as Record<string, number>);
+            const [topExp, topScore] = expEntries.reduce(
+              (a, b) => (b[1] > a[1] ? b : a),
+              ["neutral", 0] as [string, number],
+            );
+            const emoji = expressionEmoji[topExp] ?? "";
+            const age = Math.round(det.age);
+            const gender = det.gender;
+
             // Box
             ctx.strokeStyle = color;
             ctx.lineWidth = 3;
             ctx.strokeRect(x, y, width, height);
-            // Label background
+
+            // Top label (name)
             ctx.font = "600 18px system-ui, sans-serif";
-            const textWidth = ctx.measureText(label).width;
+            const topText = label;
+            const topW = ctx.measureText(topText).width;
             ctx.fillStyle = color;
-            ctx.fillRect(x - 1.5, y - 28, textWidth + 16, 28);
-            // Label text
+            ctx.fillRect(x - 1.5, y - 28, topW + 16, 28);
             ctx.fillStyle = "white";
-            ctx.fillText(label, x + 6, y - 8);
+            ctx.fillText(topText, x + 6, y - 8);
+
+            // Bottom label (expression + age + gender)
+            const bottomText = `${emoji} ${topExp} ${Math.round(topScore * 100)}% · ${gender} ${age}`;
+            ctx.font = "500 14px system-ui, sans-serif";
+            const botW = ctx.measureText(bottomText).width;
+            ctx.fillStyle = "rgba(0,0,0,0.7)";
+            ctx.fillRect(x - 1.5, y + height, botW + 16, 24);
+            ctx.fillStyle = "white";
+            ctx.fillText(bottomText, x + 6, y + height + 16);
           });
         } catch (err) {
           console.error("Detection error", err);
